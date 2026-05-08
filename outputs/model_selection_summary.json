@@ -1,0 +1,38 @@
+﻿{
+  "input_file": "data/ver1.xlsx",
+  "data_sheet": "Data Model",
+  "lookback_days": 90,
+  "train_snapshot": "2023-09-30",
+  "test_snapshot": "2023-10-31",
+  "forecast_snapshot": "2023-11-30",
+  "selected_model": "random_forest_calibrated",
+  "selected_threshold": 0.5380230930245646,
+  "selection_metric_order": [
+    "roc_auc",
+    "average_precision",
+    "f2",
+    "precision"
+  ],
+  "best_backtest": {
+    "model": "random_forest_calibrated",
+    "train_customers": 76,
+    "test_customers": 116,
+    "test_churn_rate_actual": 0.5775862068965517,
+    "test_churn_rate_predicted_mean_prob": 0.4743457521716753,
+    "roc_auc": 0.9303990252817546,
+    "average_precision": 0.9595044610253826,
+    "threshold": 0.5380230930245646,
+    "precision": 0.9454545454545454,
+    "recall": 0.7761194029850746,
+    "f2": 0.804953560371517,
+    "tn": 46,
+    "fp": 3,
+    "fn": 15,
+    "tp": 52,
+    "threshold_reason": "{\"threshold\": 0.5380230930245646, \"precision\": 0.9454545454545454, \"recall\": 0.7761194029850746, \"f2\": 0.804953560371517, \"urgent_count\": 55.0}"
+  },
+  "warnings": [
+    "Only one strict monthly holdout is available because the source data covers 2023-09 through 2023-11.",
+    "December churn labels are not available in data/ver1.xlsx, so December output is a forecast only."
+  ]
+}

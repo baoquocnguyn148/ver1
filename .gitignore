@@ -6,8 +6,11 @@ __pycache__/
 
 # Virtual env
 .venv/
+.runtime_deps/
 venv/
 env/
+.pip_tmp/
+.pip_tmp2/
 
 # Excel temp files
 ~$*.xlsx

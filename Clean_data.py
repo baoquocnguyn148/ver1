@@ -3,8 +3,8 @@
   BC VER1 BUILDER — Toàn bộ quy trình xử lý dữ liệu từ file gốc → ver1
   Author  : Antigravity AI Data Analyst
   Date    : 04/2026
-  Input   : c:/Users/usr/Downloads/bc_fixed_v2 (1).xlsx
-  Output  : D:/ver1/bc_ver1.xlsx
+  Input   : D:/ver1/data/ver1.xlsx by default
+  Output  : D:/ver1/ver1_cleaned.xlsx by default
 
   Mô tả:
     Script này tái tạo toàn bộ pipeline xử lý dữ liệu từ file bc gốc,
@@ -30,16 +30,18 @@ import os
 # ─────────────────────────────────────────────────────────────────────────────
 # CONFIG
 # ─────────────────────────────────────────────────────────────────────────────
-INPUT_FILE   = r'c:\Users\usr\Downloads\bc_fixed_v2 (1).xlsx'
-OUTPUT_DIR   = r'D:\ver1'
-OUTPUT_FILE  = os.path.join(OUTPUT_DIR, 'bc_ver1.xlsx')
-RAW_SHEET    = 'Raw Data (Sạch)'
+PROJECT_DIR  = os.path.dirname(os.path.abspath(__file__))
+INPUT_FILE   = os.environ.get('CHURN_CLEAN_INPUT', os.path.join(PROJECT_DIR, 'data', 'ver1.xlsx'))
+OUTPUT_DIR   = os.environ.get('CHURN_CLEAN_OUTPUT_DIR', os.path.join(PROJECT_DIR, 'outputs'))
+OUTPUT_FILE  = os.environ.get('CHURN_CLEAN_OUTPUT', os.path.join(OUTPUT_DIR, 'ver1_cleaned.xlsx'))
+RAW_SHEET    = os.environ.get('CHURN_CLEAN_SHEET', 'Data Model')
 
 # Sheets cần COPY NGUYÊN (không phải Pivot)
 COPY_SHEETS = [
     'Product Dashboard',
     'Customer Dashboard',
-    'Raw Data (Sạch)',
+    RAW_SHEET,
+    'Strategic Insights',
     'RFM Table',
     'Pivot Khách Hàng',
     'Segment Overview',
@@ -305,7 +307,7 @@ wb_check.close()
 file_size_kb = os.path.getsize(OUTPUT_FILE) / 1024
 
 print("\n" + "="*70)
-print("  OUTPUT SUMMARY — bc_ver1.xlsx")
+print(f"  OUTPUT SUMMARY — {os.path.basename(OUTPUT_FILE)}")
 print("="*70)
 print(f"  File    : {OUTPUT_FILE}")
 print(f"  Size    : {file_size_kb:,.1f} KB")

@@ -1,306 +1,137 @@
-# 🔮 Customer Churn Prediction Pipeline
+# Customer Churn Prediction Pipeline
 
-> **End-to-End Machine Learning System** — Dự báo khách hàng rời bỏ cho doanh nghiệp bán lẻ thực tế
+Pipeline dự báo khách hàng có nguy cơ churn cho dữ liệu bán lẻ trong `ver1.xlsx`.
 
-[![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)](https://python.org)
-[![scikit-learn](https://img.shields.io/badge/scikit--learn-1.3%2B-F7931E?logo=scikit-learn&logoColor=white)](https://scikit-learn.org)
-[![XGBoost](https://img.shields.io/badge/XGBoost-1.7%2B-189fdd)](https://xgboost.readthedocs.io)
-[![Excel](https://img.shields.io/badge/Microsoft_Excel-Dashboard-217346?logo=microsoftexcel&logoColor=white)](#)
-[![Jupyter](https://img.shields.io/badge/Jupyter-Notebook-F37626?logo=jupyter&logoColor=white)](https://jupyter.org)
+## Trạng thái hiện tại
 
----
+- Input chính: `data/ver1.xlsx`, sheet `Data Model`
+- Dữ liệu: 705 giao dịch, 159 khách hàng, 220 mã sản phẩm
+- Khoảng thời gian dữ liệu: 2023-09-01 đến 2023-11-30
+- Output vận hành chính: `outputs/churn_list.xlsx`
+- Model được chọn sau benchmark mới nhất: `random_forest_calibrated`
+- Snapshot forecast: 2023-11-30, dự báo rủi ro churn tháng 12
 
-## 📌 Tổng Quan Dự Án
+## Cấu trúc
 
-Dự án xây dựng một **pipeline Machine Learning hoàn chỉnh** để dự báo khách hàng có nguy cơ rời bỏ (churn) trong tháng tới, phục vụ trực tiếp cho hoạt động vận hành sales của doanh nghiệp bán lẻ.
+| File | Vai trò |
+|---|---|
+| `churn_pipeline_main.py` | Pipeline chính: load data, build feature, benchmark model, forecast, export Excel |
+| `data/ver1.xlsx` | Workbook nguồn và dashboard Excel |
+| `Clean_data.py` | Script làm sạch/tái dựng workbook Excel khi cần |
+| `outputs/churn_list.xlsx` | Danh sách khách hàng cần xử lý theo rủi ro churn |
+| `outputs/churn_model_comparison.xlsx` | Kết quả benchmark Logistic Regression, Random Forest, XGBoost |
+| `outputs/churn_backtest_nov.xlsx` | Backtest chi tiết tháng 11 theo từng khách hàng |
+| `outputs/churn_deepdive_data.xlsx` | Confusion matrix và metric tóm tắt theo model |
+| `outputs/churn_rate_report.xlsx` | Báo cáo churn theo segment |
+| `outputs/model_selection_summary.json` | Metadata lựa chọn model và threshold |
+| `requirements.txt` | Dependency cần cài để chạy lại pipeline |
+| `dw/DW_IMPLEMENTATION_PLAN.md` | Plan DW mới bám sát pipeline hiện tại |
+| `dw/DW_Master_Script_Full.sql` | DDL/SP SQL Server cho DW |
+| `dw/load_excel_to_sql.py` | Load `data/ver1.xlsx` vào `stg.SalesRaw` |
+| `dw/load_scores_to_sql.py` | Load `outputs/churn_list.xlsx` vào `stg.ChurnScoreRaw` |
 
-Toàn bộ quy trình được thiết kế theo tiêu chuẩn **production-ready**: từ làm sạch dữ liệu thực tế từ file Excel nghiệp vụ, xây dựng feature engineering theo thời gian thực, backtest nghiêm ngặt theo time-split, đến xuất danh sách khách hàng có phân tầng rủi ro và hành động cụ thể cho đội sales.
-
----
-
-## 📊 Dashboard Tổng Quan
-
-### Customer Analytic Dashboard (Excel)
-
-![Customer Analytic Dashboard](assets/customer_dashboard.png)
-
-**Nội dung dashboard:**
-- 📦 KPIs: **Doanh thu · Lợi nhuận · Tỷ lệ lợi nhuận · Số đơn hàng · Số khách hàng · Giá trị/đơn**
-- 📈 Doanh thu & Lợi nhuận theo Segment khách hàng (VIP / Trung thành / Tiềm năng / Mới / Cần chú ý)
-- 🍩 Phân bổ số lượng khách hàng theo phân khúc
-- 📊 Số lượng khách hàng theo tháng — theo dõi xu hướng theo phân khúc
-- 🏆 Top 5 khách hàng mua nhiều nhất
-
-### Product Analytic Dashboard (Excel)
-
-![Product Analytic Dashboard](assets/product_dashboard.png)
-
-**Nội dung dashboard:**
-- 💰 KPIs: Doanh thu · Lợi nhuận · Giá trị/đơn · Tỷ lệ lợi nhuận
-- 🥇 Top 5 sản phẩm theo **Tỷ lệ Lợi nhuận %** (Bar + Line combo)
-- 📊 Top 10 sản phẩm theo Doanh thu
-- 🔵 Revenue Share & LN/Khách theo phân khúc
-- 🏢 Doanh thu theo **Ngành Hàng** (12 nhóm sản phẩm)
-
----
-
-## 🎯 Bài Toán Kinh Doanh
-
-| Mục tiêu | Chi tiết |
-|----------|----------|
-| **Input** | Dữ liệu giao dịch thực tế từ `ver1.xlsx` (sheet `Data Model`) |
-| **Output** | `churn_list.xlsx` — danh sách 159 khách hàng với xác suất churn, mức rủi ro và hành động cụ thể |
-| **Định nghĩa Churn** | Khách **không mua hàng** trong cửa sổ 30 ngày mục tiêu |
-| **Horizon dự báo** | Tháng tiếp theo (rolling monthly) |
-| **Đối tượng dùng** | Đội sales vận hành — phân loại ưu tiên tiếp cận khách |
-
----
-
-## 🏗️ Kiến Trúc Pipeline
-
-```
-ver1.xlsx (Data Model)
-        │
-        ▼  Clean_data.py
-   ┌─────────────────────┐
-   │  Data Cleaning      │  Làm sạch, parse ngày, ép kiểu số, phân loại Ngành Hàng
-   │  Feature Derivation │  Tỷ lệ LN, Doanh Thu/Đơn vị
-   └─────────────────────┘
-        │
-        ▼  churn_pipeline_main.ipynb
-   ┌─────────────────────────────────────────────────────┐
-   │  STEP 1: Config (Mode, dates, output paths)         │
-   │  STEP 2: Load & Clean (parse dates, numeric coerce) │
-   │  STEP 3: Feature Engineering                        │
-   │    ├─ Recency (ngày kể từ lần mua cuối)            │
-   │    ├─ Frequency (số lần mua trong 90 ngày)         │
-   │    ├─ AOV (doanh thu trung bình / đơn)             │
-   │    ├─ Margin (tỷ lệ lợi nhuận)                     │
-   │    ├─ PromoRate (% khuyến mãi)                     │
-   │    ├─ Trend (so sánh DT 30 ngày gần vs 30 ngày cũ)│
-   │    ├─ DaysSinceFirst (độ trưởng thành KH)          │
-   │    └─ ActiveMonths (số tháng hoạt động)            │
-   │  STEP 4A: Benchmark CV (LR vs RF)                  │
-   │  STEP 4B: Backtest Time-Split (Sep→Oct train,      │
-   │           Nov predict vs Nov thực tế)              │
-   │    └─ Weighted Ensemble + Optimal Threshold (F2)   │
-   │  STEP 4E: Confusion Matrix Heatmap                  │
-   │  STEP 4C: Forecast December (multi-snapshot train) │
-   │  STEP 5: Churn Rate Report by Segment              │
-   └─────────────────────────────────────────────────────┘
-        │
-        ▼
-   ┌─────────────────────────────────────┐
-   │  OUTPUT FILES                       │
-   │  ├─ churn_list.xlsx      (scoring)  │
-   │  ├─ churn_deepdive_data.xlsx        │
-   │  └─ churn_list_DECEMBER_PREMIUM.xlsx│
-   └─────────────────────────────────────┘
-```
-
----
-
-## 🧠 ML Methodology
-
-### Feature Engineering
-
-| Feature | Công thức | Ý nghĩa |
-|---------|-----------|---------|
-| `Recency` | `(as_of_date - last_purchase).days` | Càng cao → nguy cơ churn càng lớn |
-| `Frequency` | `count(transactions)` trong 90 ngày | Tần suất mua hàng |
-| `AOV` | `Revenue / Frequency` | Giá trị đơn trung bình |
-| `Margin` | `Profit / Revenue` | Biên lợi nhuận |
-| `PromoRate` | `mean(% SL Khuyến mãi)` | Mức độ phụ thuộc khuyến mãi |
-| `Trend` | `DT_30d_gần - DT_30d_cũ` | Xu hướng mua hàng đang tăng hay giảm |
-| `DaysSinceFirst` | `(as_of - first_purchase).days` | Độ trưởng thành của khách hàng |
-| `ActiveMonths` | `nunique(Month)` | Số tháng có giao dịch |
-
-### Model Selection & Backtest
-
-```
-Backtest Strategy: Time-Split nghiêm ngặt (không random split)
-  ├─ Train:   Snapshot 30/09 → Label Tháng 10
-  ├─ Predict: Snapshot 31/10
-  └─ Evaluate vs: Ground truth Tháng 11
-
-Models Benchmarked:
-  ├─ Logistic Regression  (C=0.5, class_weight={0:1, 1:2})
-  └─ Random Forest        (n=150, max_depth=4, Sigmoid Calibration)
-```
-
-### Weighted Ensemble
-
-```python
-# Trọng số tính từ Backtest AUC của từng model
-weights[model] = AUC_model / sum(AUC_all_models)
-ens_prob = Σ (prob[model] * weights[model])
-```
-
-### Optimal Threshold (F2-Tuning)
-
-```
-Mục tiêu kép:
-  1. Tối đa F2-Score (ưu tiên Recall — bắt trọn khách churn)
-  2. Không vượt quá 55 khách "Khẩn cấp" (phù hợp năng lực sales)
-  3. Recall ≥ 72% tại ngưỡng tối ưu
-```
-
-### Phân Tầng Rủi Ro (Output)
-
-| ChurnProb | Mức độ | Hành động |
-|-----------|--------|-----------|
-| > 0.75 | 🔴 **Khẩn cấp** | Gặp mặt trực tiếp (VIP) / Gọi ngay |
-| 0.55 – 0.75 | 🟠 **Cao** | Zalo offer |
-| 0.35 – 0.55 | 🟡 **Trung bình** | Theo dõi định kỳ |
-| < 0.35 | 🟢 **Thấp** | Không cần can thiệp |
-
----
-
-## 📈 Kết Quả Đạt Được
-
-### Benchmark CV (TimeSeriesSplit k=3)
-
-| Model | CV AUC | Train AUC |
-|-------|--------|-----------|
-| Random Forest (Calibrated) | **~0.9835** | — |
-| Logistic Regression | ~0.9750 | — |
-
-### Backtest Tháng 11 (Time-Split)
-
-| Metric | Giá trị |
-|--------|---------|
-| **Ensemble AUC** | Cao — phân tách rõ |
-| **XGBoost Churn Rate Error** | `0.000102` (rất sát thực tế) |
-| **Random Forest Error** | `0.008781` |
-| **Logistic Error** | `0.019460` |
-
-### Deep Dive Instance-Level (Tháng 11)
-
-| | Dự báo: Không Churn | Dự báo: Churn |
-|---|---|---|
-| **Thực tế: Không Churn** | TN = 49 ✅ | FP = 0 ✅ |
-| **Thực tế: Churn** | FN = 0 ✅ | TP = 67 ✅ |
-
-> 💡 **96.55%** xác suất rơi vào vùng phân cực (`≤ 0.2` hoặc `≥ 0.8`) — mô hình phân tách cực kỳ rõ ràng.
-
-### Forecast Tháng 12
-
-| Metric | Giá trị |
-|--------|---------|
-| Số khách được score | **159 khách** |
-| Predicted churn rate | **41.75%** (~66 khách có nguy cơ churn) |
-| File vận hành | `churn_list.xlsx` |
-
----
-
-## 📁 Cấu Trúc Project
-
-```
-ver1/
-│
-├── 📓 churn_pipeline_main.ipynb     # Pipeline chính — chạy từng cell Shift+Enter
-├── 🐍 Clean_data.py                 # Data cleaning & feature engineering từ file gốc
-├── 📝 CHURN_END_TO_END_SUMMARY.md   # Tóm tắt toàn bộ quá trình & quyết định kỹ thuật
-│
-├── 📊 ver1.xlsx                     # Dataset gốc (sheet: Data Model)
-├── 📊 bc.xls                        # File nghiệp vụ gốc
-│
-├── 📤 churn_list.xlsx               # OUTPUT: Danh sách churn forecast (tháng 12)
-├── 📤 churn_list_DECEMBER_PREMIUM.xlsx  # OUTPUT: Bản premium với thông tin bổ sung
-├── 📤 churn_deepdive_data.xlsx      # OUTPUT: Deep-dive confusion matrix data
-│
-└── 📖 README.md                     # Tài liệu dự án
-```
-
----
-
-## 🚀 Hướng Dẫn Chạy
-
-### Yêu cầu
+## Cách chạy
 
 ```bash
-pip install pandas numpy scikit-learn xgboost openpyxl matplotlib seaborn jupyter
+pip install -r requirements.txt
+python churn_pipeline_main.py
 ```
 
-### Chạy Pipeline Chính (Jupyter Notebook)
+Trong môi trường Codex hiện tại, dependency đã được cài cục bộ vào `.venv/Lib/site-packages`, nên có thể chạy bằng:
 
 ```bash
-# 1. Mở notebook
-jupyter lab churn_pipeline_main.ipynb
-
-# 2. Chạy từng cell theo thứ tự (Shift + Enter)
-#    STEP 0: Import libraries
-#    STEP 1: Config (chọn MODE)
-#    STEP 2: Load data
-#    STEP 3: Feature engineering utilities
-#    STEP 4A: Benchmark
-#    STEP 4B: Backtest + Optimal Threshold
-#    STEP 4E: Confusion Matrix visualization
-#    STEP 4C: Forecast December
-#    STEP 5: Rate Report
+C:\Users\usr\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe churn_pipeline_main.py
 ```
 
-### Config MODE
+## Feature Engineering
 
-```python
-# Trong STEP 1, thay đổi MODE:
-MODE = 'full'          # Chạy toàn bộ pipeline (benchmark → backtest → forecast)
-MODE = 'backtest'      # Chỉ chạy backtest tháng 11
-MODE = 'forecast_dec'  # Chỉ chạy forecast tháng 12
-```
+Pipeline tạo feature theo cửa sổ lookback 90 ngày tại từng snapshot:
 
-### Chạy Data Cleaning Script
+| Feature | Ý nghĩa |
+|---|---|
+| `Recency` | Số ngày từ lần mua cuối tới snapshot |
+| `Frequency` | Số giao dịch trong 90 ngày gần nhất |
+| `AOV` | Doanh thu trung bình mỗi giao dịch |
+| `PromoRate` | Tỷ lệ khuyến mãi trung bình |
+| `Margin` | Lợi nhuận / doanh thu |
+| `Trend` | Doanh thu 30 ngày gần nhất trừ 30 ngày trước đó |
+| `DaysSinceFirst` | Số ngày từ giao dịch đầu tiên trong lookback |
+| `ActiveMonths` | Số tháng có phát sinh giao dịch trong lookback |
+| `Segment` | Phân khúc khách hàng, đưa vào model bằng one-hot encoding |
+
+## Backtest và chọn model
+
+Do dữ liệu hiện chỉ có 3 tháng, pipeline dùng một holdout theo thời gian:
+
+- Train: snapshot 2023-09-30, label theo tháng 10
+- Test: snapshot 2023-10-31, label theo tháng 11
+- Forecast: snapshot 2023-11-30, dự báo tháng 12
+
+Kết quả benchmark mới nhất:
+
+| Model | ROC AUC | Average Precision | Precision | Recall | F2 | TN | FP | FN | TP |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Random Forest calibrated | 0.9304 | 0.9595 | 0.9455 | 0.7761 | 0.8050 | 46 | 3 | 15 | 52 |
+| XGBoost | 0.9240 | 0.9435 | 0.9434 | 0.7463 | 0.7788 | 46 | 3 | 17 | 50 |
+| Logistic Regression | 0.7999 | 0.7577 | 0.8158 | 0.9254 | 0.9012 | 35 | 14 | 5 | 62 |
+
+Random Forest calibrated được chọn vì có ROC AUC và Average Precision tốt nhất, đồng thời đạt precision cao với giới hạn danh sách khẩn cấp khoảng 55 khách trong backtest. Logistic Regression có recall cao hơn nhưng tạo quá nhiều khách cần xử lý ngay, phù hợp làm baseline hơn là model vận hành.
+
+## Output vận hành
+
+`outputs/churn_list.xlsx` hiện gồm 159 khách hàng với các cột:
+
+- `Khách hàng`, `Segment`
+- `Recency`, `Frequency`, `AOV`, `Margin`, `Trend`, `ActiveMonths`
+- `RiskScore`, `ChurnProb`, `Mức độ`, `Hành động`
+
+Phân bổ rủi ro output mới nhất:
+
+| Mức độ | Số khách |
+|---|---:|
+| Khẩn cấp | 66 |
+| Cao | 25 |
+| Trung bình | 16 |
+| Thấp | 52 |
+
+## Lưu ý chất lượng
+
+- Backtest chỉ có một split theo tháng vì dữ liệu nguồn mới có 3 tháng. Khi có thêm tháng mới, nên mở rộng rolling backtest trước khi chốt lại model.
+- Dữ liệu có một số dòng lợi nhuận âm; hiện pipeline giữ nguyên vì có thể là nghiệp vụ hợp lệ, nhưng nên kiểm tra trong vận hành.
+- Output legacy `churn_list_DECEMBER_PREMIUM.xlsx` đã được gỡ khỏi project; `outputs/churn_list.xlsx` là bản vận hành chính.
+
+## Data Warehouse
+
+Phần DW nằm trong thư mục `dw/`.
+
+Runbook ngắn:
 
 ```bash
-# Cập nhật INPUT_FILE trong Clean_data.py trước khi chạy
-python Clean_data.py
+pip install -r requirements.txt
 ```
 
-> ⚠️ **Lưu ý**: Đóng tất cả file Excel trước khi chạy script để tránh lỗi `PermissionError`.
+```sql
+-- chạy trong SQL Server sau khi tạo database ChurnDW
+:r dw/DW_Master_Script_Full.sql
+```
 
----
+Nếu chạy bằng `sqlcmd`, dùng UTF-8 input để giữ đúng tiếng Việt trong stored procedure:
 
-## 🧰 Tech Stack
+```bash
+sqlcmd -S . -E -C -f 65001 -i dw/DW_Master_Script_Full.sql
+```
 
-| Category | Tools |
-|----------|-------|
-| **Language** | Python 3.10+ |
-| **Data Manipulation** | `pandas`, `numpy` |
-| **Machine Learning** | `scikit-learn` (Logistic Regression, Random Forest, Pipeline, TimeSeriesSplit, CalibratedClassifierCV) |
-| **Gradient Boosting** | `xgboost` (XGBClassifier) |
-| **Visualization** | `matplotlib`, `seaborn` |
-| **Notebook** | `jupyter`, `jupyterlab` |
-| **Excel I/O** | `openpyxl` |
-| **Business Dashboard** | Microsoft Excel (Pivot, Slicer, Chart) |
+```bash
+set CHURN_DW_CONN_STR=Driver={ODBC Driver 18 for SQL Server};Server=localhost;Database=ChurnDW;Trusted_Connection=yes;TrustServerCertificate=yes;
+python dw/load_excel_to_sql.py
+python dw/load_scores_to_sql.py
+```
 
----
+Sau đó có thể gọi:
 
-## 📐 Thiết Kế & Quyết Định Kỹ Thuật
-
-### Tại sao dùng Time-Split thay vì Random Split?
-
-> Với bài toán dự báo churn theo tháng, **random split gây rò rỉ dữ liệu tương lai** vào tập train. Time-split đảm bảo model chỉ học từ dữ liệu trong quá khứ và predict tương lai — đúng với kịch bản vận hành thực tế.
-
-### Tại sao dùng Weighted Ensemble?
-
-> Mỗi model có điểm mạnh riêng trên từng loại pattern. Ensemble có trọng số dựa trên backtest AUC giúp tận dụng điểm mạnh của cả hai model, đồng thời giảm phương sai so với dùng một model đơn lẻ.
-
-### Tại sao dùng F2-Score để tìm ngưỡng?
-
-> Trong bài toán churn, **False Negative (bỏ sót khách churn) tốn kém hơn False Positive** (tiếp cận nhầm khách không churn). F2-Score ưu tiên Recall gấp đôi Precision, phù hợp với mục tiêu kinh doanh.
-
-### Tại sao Calibrate Random Forest?
-
-> Random Forest thường cho xác suất không calibrated (dồn về 0 và 1). `CalibratedClassifierCV(method='sigmoid')` đảm bảo `ChurnProb = 0.7` thực sự có nghĩa là 70% nguy cơ churn — cho phép phân tầng rủi ro có ý nghĩa.
-
----
-
-## 📋 Ghi Chú Vận Hành
-
-- **Cadence đánh giá mô hình:** Backtest theo tháng với time-split — không dùng random split.
-- **Cập nhật dữ liệu:** Thêm giao dịch mới vào sheet `Data Model` của `ver1.xlsx`, cập nhật `AS_OF_TRAIN` và chạy lại pipeline.
-- **Output file bị khóa:** Đóng file Excel trước khi chạy script; nếu bị khóa, script sẽ tự động xuất file `*_new.xlsx`.
-
----
-
-*Dự án thực tế — Dữ liệu bán lẻ 2023 · Built with Python, scikit-learn & Excel*
+```sql
+EXEC dw.sp_ETL_RunAll;
+EXEC dw.sp_FE_BuildCustomerSnapshot @SnapshotDate = '2023-11-30';
+EXEC dw.sp_Score_LoadFromStaging @SnapshotDate = '2023-11-30';
+EXEC dw.sp_Report_ChurnList @SnapshotDate = '2023-11-30';
+```
