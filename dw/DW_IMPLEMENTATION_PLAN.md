@@ -1,180 +1,169 @@
-# Data Warehouse Implementation Plan
+# 🚀 Kế Hoạch Triển Khai Data Warehouse (DW Implementation Plan)
 
-Plan này thay thế bản DW cũ và bám sát project hiện tại:
+*Tài liệu này đóng vai trò là "bản thiết kế thi công" (blueprint) cho toàn bộ hệ thống Data Warehouse. Nội dung đã được tối ưu hóa để thân thiện với người đọc (human-friendly) và bám sát tuyệt đối vào thực tế dự án Data Science hiện hành.*
 
-- Source of truth dữ liệu giao dịch: `data/ver1.xlsx`, sheet `Data Model`.
-- Pipeline ML hiện hành: `churn_pipeline_main.py`.
-- Model vận hành đã benchmark: `random_forest_calibrated`.
-- Output vận hành: `outputs/churn_list.xlsx`.
-- DBMS mục tiêu: Microsoft SQL Server.
+**Thông tin cấu hình hiện tại:**
+- **Source of truth dữ liệu giao dịch:** `data/ver1.xlsx` (sheet `Data Model`)
+- **Pipeline ML hiện hành:** `churn_pipeline_main.py`
+- **Model vận hành đã benchmark:** `Random Forest Calibrated`
+- **Output vận hành (Reverse ETL):** `outputs/churn_list.xlsx`
+- **Hệ quản trị CSDL mục tiêu:** Microsoft SQL Server
 
-## 1. Mục tiêu DW
+---
 
-DW không thay thế hoàn toàn Python ML. DW chịu trách nhiệm làm source of truth cho dữ liệu bán hàng, feature snapshot, score history và reporting. Python giữ vai trò train/predict model.
+## 🎯 1. Mục Tiêu Cốt Lõi Của DW
 
-Luồng chuẩn:
+Hệ thống Data Warehouse (DW) **không sinh ra để thay thế Python ML**. Thay vào đó, DW và Python được kết hợp để phát huy thế mạnh của từng công cụ:
+- **DW đảm nhiệm:** Trở thành Single Source of Truth, chuẩn hóa dữ liệu bán hàng, lưu trữ Feature Snapshot phục vụ AI, quản lý Score History và cung cấp dữ liệu cho Reporting (Power BI).
+- **Python đảm nhiệm:** Chuyên sâu vào thuật toán Học máy (Train, Tuning, Predict).
 
+**🌊 Luồng dữ liệu chuẩn (Standard Data Flow):**
 ```text
-data/ver1.xlsx
-  -> stg.SalesRaw
-  -> dw.DimDate, dw.DimCustomer, dw.DimProduct, dw.FactSales
-  -> dw.CustomerSnapshot
-  -> Python Random Forest calibrated
-  -> stg.ChurnScoreRaw
-  -> dw.FactChurnScore
-  -> report stored procedures / Power BI
+[Excel Source] data/ver1.xlsx
+      │
+      ├─> 📥 [STG] stg.SalesRaw (Staging Area)
+      │
+      ├─> 🗄️ [DW] dw.DimDate, dw.DimCustomer, dw.DimProduct, dw.FactSales (Star Schema)
+      │
+      ├─> 🧠 [DW] dw.CustomerSnapshot (Feature Store for ML)
+      │
+      ├─> 🤖 [PYTHON] Random Forest Calibrated (Machine Learning Pipeline)
+      │
+      ├─> 📤 [STG] stg.ChurnScoreRaw (Reverse ETL Staging)
+      │
+      ├─> 🎯 [DW] dw.FactChurnScore (Scoring History)
+      │
+      └─> 📊 [REPORTING] Power BI / Stored Procedures 
 ```
 
-## 2. Nguyên tắc thiết kế
+---
 
-1. Không dùng tên cột tiếng Việt trong bảng DW lõi. Tên cột nội bộ dùng English/ASCII để dễ tích hợp.
-2. Staging giữ mapping đầy đủ từ Excel, gồm `SourceRowNumber` từ `STT` để chống trùng.
-3. Không tự phân loại `Ngành Hàng` bằng CASE trong SQL. Source đã có `Ngành Hàng`, DW dùng trực tiếp để tránh sai category.
-4. Feature engineering trong SQL phải khớp `churn_pipeline_main.py`:
-   - lookback 90 ngày
-   - `SaleDate > SnapshotDate - 90` và `SaleDate <= SnapshotDate`
-   - chỉ customer có giao dịch trong lookback mới có snapshot
-   - `Trend = revenue last 30 days - revenue previous 30 days`
-5. Historical segment phải lấy theo giao dịch gần nhất trước hoặc bằng snapshot, không dùng segment tương lai.
-6. Score/risk rule phải khớp output hiện tại:
-   - `UrgentThreshold = 0.5380230930245646`
-   - `HighThreshold = 0.35`
-   - `MediumThreshold = 0.20`
-   - VIP + Khẩn cấp -> `Gặp mặt trực tiếp`
-   - Khẩn cấp hoặc `Recency > 60` -> `Gọi ngay`
-   - Cao hoặc `Recency > 30` -> `Zalo offer`
-   - còn lại -> `Theo dõi định kỳ`
+## 💡 2. Nguyên Tắc Thiết Kế (Core Design Principles)
 
-## 3. Schemas
+Để đảm bảo hệ thống vận hành trơn tru và dễ bảo trì, các nguyên tắc sau được tuân thủ nghiêm ngặt:
 
-| Schema | Vai trò |
-|---|---|
-| `stg` | Landing/staging từ Excel và Python scoring |
-| `dw` | Dim/fact/snapshot/reporting tables |
-| `cfg` | Model version, threshold, runtime parameters |
-| `audit` | Batch metadata, load status |
+1. **Chuẩn hóa Định dạng:** Tuyệt đối không dùng tên cột tiếng Việt trong Core DW. Các trường được chuyển đổi sang chuẩn Tiếng Anh/ASCII để đảm bảo tương thích 100% với các công cụ Data Stack khác.
+2. **Bảo toàn Dấu vết Dữ liệu (Traceability):** Vùng Staging giữ lại toàn bộ mapping từ file Excel. Cột `STT` gốc được chuyển thành `SourceRowNumber` để truy xuất nguồn gốc và chống trùng lặp.
+3. **SSOT (Single Source of Truth):** Không tự tạo logic phân loại `Ngành Hàng` bằng `CASE WHEN` trong SQL. DW sử dụng trực tiếp Master Data từ Source để tránh sai lệch cấu trúc Category.
+4. **Nhất quán Feature Engineering (A.I Consistency):** Logic tính toán Feature bằng SQL phải khớp hoàn toàn với bản Python `churn_pipeline_main.py`:
+   - Cửa sổ quan sát (Lookback window) là **90 ngày**.
+   - Công thức lùi ngày: `SaleDate > SnapshotDate - 90` và `SaleDate <= SnapshotDate`.
+   - Chỉ giữ lại Snapshot của những khách hàng có phát sinh giao dịch trong lookback window.
+   - `Trend = (Doanh thu 30 ngày gần nhất) - (Doanh thu 30 ngày trước đó)`.
+5. **Chống Rò rỉ Dữ liệu (No Data Leakage):** Trạng thái phân khúc (Historical Segment) phải được chốt chính xác tại ngày chạy Snapshot, tuyệt đối không dùng Segment của thì tương lai.
+6. **Đồng bộ Business Rules:** Logic phân loại Rủi ro (Risk Rule) và Hành động (Sales Action) phải ánh xạ chính xác từ mô hình:
+   - `UrgentThreshold` = 0.538... (Mức tối ưu F2-Score)
+   - VIP + Rủi ro Khẩn cấp ➡️ **Gặp mặt trực tiếp**
+   - Rủi ro Khẩn cấp hoặc Bỏ dở lâu (Recency > 60) ➡️ **Gọi ngay**
+   - Rủi ro Cao hoặc Recency > 30 ➡️ **Zalo offer**
+   - Các trường hợp còn lại ➡️ **Theo dõi định kỳ**
 
-## 4. Core tables
+---
 
-### `stg.SalesRaw`
+## 🏗️ 3. Kiến Trúc Schemas
 
-Nhận dữ liệu từ `data/ver1.xlsx`. Tên cột đã chuẩn hóa sang English:
+Thiết kế Database tách biệt rõ ràng theo chuẩn Enterprise Data Warehouse:
 
-- `SourceRowNumber`, `ProductCode`, `ProductName`, `UnitName`
-- `ImportAmount`, `PromoQuantity`, `SalesQuantity`, `ExportAmount`
-- `Revenue`, `SaleDate`, `CustomerName`, `SegmentName`
-- `Profit`, `MarginPct`, `TotalQuantitySold`, `PromoPct`
-- `YearNumber`, `MonthNumber`, `CategoryName`
-- `SourceFileName`, `LoadBatchId`, `RowHash`
+| Schema | Vai trò & Chức năng |
+|:---:|---|
+| **`stg`** | **Staging (Vùng đệm):** Nơi hạ cánh dữ liệu từ Excel và kết quả Scoring từ Python. |
+| **`dw`** | **Data Warehouse (Lõi):** Chứa hệ thống Core Star Schema (Dim, Fact), Feature Snapshot và Reporting Views. |
+| **`cfg`** | **Configuration (Cấu hình):** Quản lý Model Version, các ngưỡng rủi ro Thresholds, và Parameter hệ thống. |
+| **`audit`**| **Audit Log (Nhật ký):** Ghi nhận trạng thái Load (Batch metadata, Thành công/Thất bại, Số lượng row nạp). |
 
-### `dw.FactSales`
+---
 
-Fact giao dịch trung tâm, grain = một dòng giao dịch từ Excel.
+## 🗂️ 4. Các Bảng Dữ Liệu Trung Tâm (Core Tables)
 
-Unique key: `(SourceSystem, SourceRowNumber)`.
+### 📥 `stg.SalesRaw`
+Hứng dữ liệu thô từ `data/ver1.xlsx`. Tên cột được Mapping chuẩn Tiếng Anh.
+- *Fields:* `SourceRowNumber`, `ProductCode`, `ProductName`, `Revenue`, `SaleDate`, `CustomerName`, `SegmentName`, `Profit`, `MarginPct`, `CategoryName`, v.v.
+- *Metadata:* `SourceFileName`, `LoadBatchId`, `RowHash` (Dùng cho CDC).
 
-Giữ thêm `SegmentAtSale` để build historical snapshot không bị leakage.
+### 🛍️ `dw.FactSales`
+Bảng Fact giao dịch trung tâm (Granularity: 1 dòng giao dịch từ Excel).
+- *Unique Key:* `(SourceSystem, SourceRowNumber)`.
+- *Note:* Lưu trữ trường `SegmentAtSale` để phục vụ tái tạo Historical Snapshot mà không dính Data Leakage.
 
-### `dw.CustomerSnapshot`
+### 🧠 `dw.CustomerSnapshot`
+Bảng Feature Store trực tiếp cung cấp đạn dược cho Machine Learning.
+- *Features:* `Segment`, `Recency`, `Frequency`, `AOV`, `PromoRate`, `Margin`, `Trend`, `DaysSinceFirst`, `ActiveMonths`.
+- *ML Target:* `ChurnLabel` (Phục vụ huấn luyện & backtest).
+- *Primary Key:* `(SnapshotDate, CustomerKey)`.
 
-Feature table phục vụ model:
+### 🎯 `dw.FactChurnScore`
+Bảng lưu trữ Lịch sử Điểm số (Scoring History) theo chiều không gian (Khách hàng) và chiều thời gian (Snapshot).
+- *Fields:* `ChurnProb`, `RiskScore`, `RiskLevel`, `SalesAction`.
+- *MLOps Fields:* `ModelName`, `ModelVersion`.
 
-- `Segment`
-- `Recency`
-- `Frequency`
-- `AOV`
-- `PromoRate`
-- `Margin`
-- `Trend`
-- `DaysSinceFirst`
-- `ActiveMonths`
-- `ChurnLabel`
+---
 
-Primary key: `(SnapshotDate, CustomerKey)`.
+## ⚙️ 5. Hệ Thống Data Engineering Engine (Stored Procedures)
 
-### `dw.FactChurnScore`
+Hệ thống được tự động hóa bằng SQL Stored Procedures mạnh mẽ:
 
-Lưu score theo snapshot, customer, model version:
+| Stored Procedure | Phân nhóm | Mục đích hoạt động |
+|---|---|---|
+| `cfg.sp_SetDefaultConfig` | **Config** | Khởi tạo cấu hình hệ thống & Thresholds mặc định. |
+| `audit.sp_StartEtlBatch` / `sp_FinishEtlBatch` | **Audit** | Mở / Đóng một phiên làm việc ETL (Batch Management). |
+| `dw.sp_ETL_LoadDimDate` / `LoadDimensions` | **ELT** | Xử lý và Upsert các bảng Dimension (Thời gian, Khách hàng, Sản phẩm). |
+| `dw.sp_ETL_LoadFactSales` | **ELT** | Merge dữ liệu giao dịch từ Staging vào bảng Fact. |
+| `dw.sp_ETL_RunAll` | **ELT Master** | Thủ tục Orchestrator: Chạy tự động toàn bộ luồng ELT. |
+| `dw.sp_FE_BuildCustomerSnapshot` | **Feature Eng.** | Tính toán 8 biến số RFM phức tạp trong cửa sổ 90 ngày. |
+| `dw.sp_FE_BuildChurnLabel` | **Feature Eng.** | Gắn nhãn Churn (Label 0/1) phục vụ quá trình Retrain/Backtest. |
+| `dw.sp_Score_UpsertChurnScore` | **MLOps** | Reverse ETL: Cập nhật Churn Score từ AI vào Data Warehouse. |
+| `dw.sp_Score_ApplyBusinessRules` | **MLOps** | Ứng dụng Business Rules động để gán mức rủi ro và hành động thực thi. |
 
-- `ChurnProb`
-- `RiskScore`
-- `RiskLevel`
-- `SalesAction`
-- `ModelName`
-- `ModelVersion`
+---
 
-## 5. Stored procedures
+## 🐍 6. Tích Hợp Python & MLOps
 
-| Procedure | Mục đích |
-|---|---|
-| `cfg.sp_SetDefaultConfig` | Seed threshold và model version hiện hành |
-| `audit.sp_StartEtlBatch` | Tạo batch load |
-| `audit.sp_FinishEtlBatch` | Cập nhật trạng thái batch |
-| `dw.sp_ETL_LoadDimDate` | Sinh date dimension |
-| `dw.sp_ETL_LoadDimensions` | Upsert customer/product |
-| `dw.sp_ETL_LoadFactSales` | Merge staging vào fact |
-| `dw.sp_ETL_RunAll` | Chạy DimDate -> Dimensions -> Fact |
-| `dw.sp_FE_BuildCustomerSnapshot` | Build feature snapshot 90 ngày |
-| `dw.sp_FE_BuildChurnLabel` | Gắn nhãn churn cho backtest/retrain |
-| `dw.sp_Score_LoadFromStaging` | Load score từ `stg.ChurnScoreRaw` vào fact score |
-| `dw.sp_Score_UpsertChurnScore` | Upsert một score đơn lẻ |
-| `dw.sp_Score_ApplyBusinessRules` | Gắn risk/action |
-| `dw.sp_Report_*` | Report cho Power BI / sales |
+Bộ công cụ Python đảm nhiệm khâu cầu nối (Ingestion & Reverse ETL):
+- **`dw/load_excel_to_sql.py`**: Quét file `ver1.xlsx` và nạp vào `stg.SalesRaw`.
+- **`dw/load_scores_to_sql.py`**: Quét file kết quả `outputs/churn_list.xlsx` từ mô hình AI và nạp vào `stg.ChurnScoreRaw`.
 
-## 6. Python integration
+**Biến Môi Trường (Environment Variables):**
+- `CHURN_DW_CONN_STR`: Connection string kết nối cơ sở dữ liệu.
+- `CHURN_DW_SOURCE_FILE`: Tùy chỉnh nguồn dữ liệu Excel đầu vào (nếu có).
+- `CHURN_DW_SCORE_FILE`: Tùy chỉnh nguồn file kết quả (nếu có).
 
-Thêm script:
+---
 
-- `dw/load_excel_to_sql.py`: đọc `data/ver1.xlsx` và insert vào `stg.SalesRaw`.
-- `dw/load_scores_to_sql.py`: đọc `outputs/churn_list.xlsx` và insert vào `stg.ChurnScoreRaw`.
+## 📝 7. Sổ Tay Vận Hành (Runbook)
 
-Kết nối dùng environment variables:
+Quy trình chuẩn hóa một chu kỳ vận hành từ A đến Z:
 
-- `CHURN_DW_CONN_STR`: pyodbc connection string đầy đủ.
-- `CHURN_DW_SOURCE_FILE`: override source workbook nếu cần.
-- `CHURN_DW_SCORE_FILE`: override score workbook nếu cần.
-
-## 7. Runbook
-
-1. Tạo database `ChurnDW`.
-2. Chạy `dw/DW_Master_Script_Full.sql`.
-3. Load Excel:
-
+**1. Khởi tạo Cơ sở dữ liệu:** Tạo DB tên `ChurnDW` và chạy master script `dw/DW_Master_Script_Full.sql`.
+**2. Nạp dữ liệu nguồn:** Chạy script Python Ingestion.
 ```bash
 python dw/load_excel_to_sql.py
 ```
-
-4. Chạy ETL trong SQL:
-
+**3. Data Engineering In-DB (ETL & FE):** Khởi chạy thủ tục thông qua SQL:
 ```sql
 EXEC dw.sp_ETL_RunAll @LoadBatchId = NULL;
-EXEC dw.sp_FE_BuildCustomerSnapshot @SnapshotDate = '2023-09-30';
-EXEC dw.sp_FE_BuildChurnLabel @SnapshotDate = '2023-09-30';
-EXEC dw.sp_FE_BuildCustomerSnapshot @SnapshotDate = '2023-10-31';
-EXEC dw.sp_FE_BuildChurnLabel @SnapshotDate = '2023-10-31';
 EXEC dw.sp_FE_BuildCustomerSnapshot @SnapshotDate = '2023-11-30';
 ```
-
-5. Python train/predict bằng `churn_pipeline_main.py`.
-6. Load score:
-
+**4. Kích hoạt Trí Tuệ Nhân Tạo:** Huấn luyện / Dự báo bằng Python.
+```bash
+python churn_pipeline_main.py
+```
+**5. Nạp ngược Kết quả (Reverse ETL):**
 ```bash
 python dw/load_scores_to_sql.py
 ```
-
-7. Trong SQL:
-
+**6. Gán Business Rules & Xuất Báo Cáo:**
 ```sql
 EXEC dw.sp_Score_LoadFromStaging @SnapshotDate = '2023-11-30';
 EXEC dw.sp_Report_ChurnList @SnapshotDate = '2023-11-30';
 ```
 
-## 8. Production hardening
+---
 
-Khi có thêm dữ liệu tháng mới:
+## 🛡️ 8. Chiến Lược Đưa Lên Môi Trường Thực Tế (Production Hardening)
 
-1. Giữ toàn bộ score history, không overwrite output cũ.
-2. Thêm rolling backtest nhiều tháng vào `dw.CustomerSnapshot`.
-3. Cập nhật `cfg.ModelVersion` khi model mới được chọn.
-4. Đưa ingestion và scoring vào SQL Agent / orchestrator.
-5. Thêm kiểm tra reconciliation: tổng doanh thu/profit giữa Excel và `dw.FactSales`.
+Để hệ thống thực sự vươn tầm Enterprise, các cấu phần sau sẽ được siết chặt:
+1. **Lưu vết Vĩnh viễn (Audit Trail History):** Lưu toàn bộ lịch sử Churn Score qua các tháng thay vì ghi đè (overwrite), cho phép đánh giá chất lượng model qua thời gian.
+2. **Rolling Backtest Multi-months:** Xây dựng quy trình Backtesting nhiều kỳ liên tiếp bằng cách tự động sinh Label trên bảng `dw.CustomerSnapshot`.
+3. **Automated Model Registry:** Tự động tăng tiến `cfg.ModelVersion` mỗi khi có Model mới chiến thắng (Champion Model) trong quá trình re-train.
+4. **Orchestrator Automation:** Tích hợp toàn bộ Data Pipeline (từ Ingestion đến Scoring) vào công cụ điều phối (Airflow / SQL Agent) theo lịch trình hàng tháng.
+5. **Data Reconciliation:** Bổ sung thủ tục đối soát tự động (ví dụ: Tổng doanh thu/Lợi nhuận tại `stg.SalesRaw` phải bằng 100% so với `dw.FactSales`).
